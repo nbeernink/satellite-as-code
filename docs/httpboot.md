@@ -111,13 +111,26 @@ firewall:
     immediate: true
 ```
 
-### Step 3: Operating System Templates -- Enable PXEGrub2
+### Step 3: Operating System Templates -- Custom PXEGrub2
 
 HTTP Boot uses GRUB2 as the bootloader. The `PXEGrub2` template kind
 must be associated with each operating system that will use HTTP Boot.
 
-In `host_vars/<satellite-fqdn>/13_operating_systems.yml`, change the
-`PXEGrub2` entry from `absent` to `present` and assign a template:
+The stock `Kickstart default PXEGrub2` template hardcodes
+`set default=0`, which always selects the plain PXE (TFTP) menu entry.
+For HTTP Boot clients this is wrong -- they need the HTTP entry selected
+by default. The `23_satellite_template_deploy.yml` playbook automates
+this by:
+
+1. Fetching the stock `Kickstart default PXEGrub2` template from the
+   Satellite API.
+2. Replacing `set default=0` with ERB logic that selects the correct
+   default based on `@host.pxe_loader` (HTTP, HTTPS, or plain PXE).
+3. Creating (or updating) a custom template named
+   `pvt-kickstart_default_pxegrub2`.
+
+In `host_vars/<satellite-fqdn>/13_operating_systems.yml`, reference the
+custom template:
 
 ```yaml
 satellite_operatingsystems:
@@ -129,15 +142,19 @@ satellite_operatingsystems:
       # ... other templates ...
 
       - template_kind: 'PXEGrub2'
-        provisioning_template: 'Kickstart default PXEGrub2'
+        provisioning_template: 'pvt-kickstart_default_pxegrub2'
         state: 'present'
 ```
 
 Repeat for every OS version you intend to provision via HTTP Boot.
 
-Apply the change:
+Apply the changes:
 
 ```bash
+# Create the custom template and build PXE defaults
+ansible-playbook 23_satellite_template_deploy.yml --limit <satellite-fqdn>
+
+# Associate the template with the operating systems
 ansible-playbook 16_satellite_operating_systems.yml
 ```
 
@@ -146,7 +163,8 @@ ansible-playbook 16_satellite_operating_systems.yml
 > generate the GRUB2 configuration files (`grub.cfg`) that the client
 > requests after loading `shim.efi`. This manifests as HTTP 404 errors
 > during boot and the message "This system was not recognized by
-> Foreman."
+> Foreman." Additionally, the stock template always defaults to the
+> TFTP-based boot entry, which fails for HTTP Boot clients.
 
 ### Step 4: Subnet -- Assign Capsule as HTTP Boot Proxy
 
@@ -160,8 +178,8 @@ satellite_subnets:
     network: '172.16.80.0'
     mask: '255.255.255.0'
     gateway: '172.16.80.254'
-    boot_mode: 'Static'
-    ipam: 'None'
+    boot_mode: 'DHCP'
+    ipam: 'DHCP'
     tftp_proxy: '<capsule-fqdn>'
     httpboot_proxy: '<capsule-fqdn>'
     template_proxy: '<capsule-fqdn>'
@@ -170,6 +188,21 @@ satellite_subnets:
       - '<capsule-fqdn>'
     # ... dns, domains, org, location ...
 ```
+
+The `boot_mode` and `ipam` settings control how Anaconda configures
+networking during installation:
+
+| Setting | Value | Meaning |
+|---------|-------|---------|
+| `boot_mode: 'DHCP'` | Anaconda uses DHCP to obtain its IP (`ip=...::dhcp` on kernel cmdline) |
+| `boot_mode: 'Static'` | Anaconda uses a static IP that must be assigned to the host record |
+| `ipam: 'DHCP'` | Satellite queries the DHCP server for lease information |
+| `ipam: 'None'` | Satellite does not manage IP allocation (manual assignment required) |
+
+> **Important**: With `boot_mode: 'Static'` and `ipam: 'None'`, every
+> host must have an IP address explicitly assigned. If the IP is missing,
+> the kernel `ip=` parameter will have an empty client address and
+> Anaconda will fail with "missing inst.stage2 or inst.repo".
 
 The critical proxy assignments:
 
@@ -249,23 +282,62 @@ Apply the change:
 ansible-playbook 18_satellite_host_groups.yml
 ```
 
-### Step 6: Build PXE Defaults
+### Step 6: Build PXE Defaults and Fix the grub.cfg Path
 
 After all template and host group configuration is in place, Satellite
 must generate the global PXE boot files and push them to the smart
 proxies. This creates the GRUB2 directory tree (`shim.efi`, `grub.cfg`,
 module `.lst` files) on each proxy's HTTP Boot root.
 
-Run the template deploy playbook:
+The `23_satellite_template_deploy.yml` playbook performs five tasks:
+
+1. **Creates `pvt-kickstart_default_pxegrub2`** (PXEGrub2 template) --
+   fetches the stock `Kickstart default PXEGrub2`, patches the
+   `set default` logic to auto-select the HTTP/HTTPS/PXE entry based
+   on `@host.pxe_loader`, and uploads it as a new template.
+2. **Creates `snt-kickstart_rhsm`** (snippet) -- fetches the stock
+   `kickstart_rhsm` snippet and prepends a `%pre` script that downloads
+   the Satellite CA certificate before the `rhsm` Anaconda addon runs.
+   Without this, RHSM registration fails with an SSL certificate
+   verification error because the Anaconda environment does not trust
+   the Satellite's internal CA.
+3. **Creates `pvt-kickstart_default`** (provision template) -- fetches
+   the stock `Kickstart default` and replaces the `kickstart_rhsm`
+   snippet call with `snt-kickstart_rhsm`.
+4. **Builds PXE defaults** via the Satellite API, generating the global
+   boot files on all smart proxies.
+5. **Creates symlinks** on TFTP servers to bridge the path mismatch
+   between where DHCP tells clients to look (`/EFI/grub2/`) and where
+   "Build PXE Defaults" places `grub.cfg` (`/grub2/`).
+
+All custom templates are associated with the operating systems defined
+in `satellite_operatingsystems`. They follow the `pvt-`/`snt-` naming
+convention used by the template sync mechanism and do not modify any
+locked stock templates.
+
+**Important path mismatch**: Satellite's DHCP `httpclients` class tells
+HTTP Boot clients to load `shim.efi` from `/EFI/grub2/` (e.g.,
+`http://<capsule>:8000/EFI/grub2/shim.efi`). GRUB2 then looks for
+`grub.cfg` relative to this same path. However, "Build PXE Defaults"
+generates `grub.cfg` at `/var/lib/tftpboot/grub2/grub.cfg` -- a
+different directory. Without a symlink bridging these two paths, GRUB2
+cannot find its configuration and falls back to searching local EFI
+directories.
+
+Run it against the Satellite first, then against the Capsule:
 
 ```bash
-ansible-playbook 23_satellite_template_deploy.yml
+ansible-playbook 23_satellite_template_deploy.yml --limit <satellite-fqdn>
+ansible-playbook 23_satellite_template_deploy.yml --limit <capsule-fqdn>
 ```
 
-This calls the Satellite API endpoint
-`POST /api/v2/provisioning_templates/build_pxe_default`, which is
-equivalent to clicking **Build PXE Defaults** in the Satellite web UI
-under *Hosts > Templates > Provisioning Templates*.
+On the Satellite, the playbook creates the three custom templates,
+calls the API endpoint
+`POST /api/v2/provisioning_templates/build_pxe_default` (equivalent to
+clicking **Build PXE Defaults** in the web UI under *Hosts > Templates
+> Provisioning Templates*), and creates the EFI symlinks. On the
+Capsule, it creates the symlinks only (the API tasks are skipped
+because the Satellite API variables are not defined).
 
 > **This step must be repeated** whenever you change PXE-related
 > provisioning templates or add new operating system template
@@ -290,15 +362,18 @@ ansible-playbook 01_register_satellite.yml --limit <capsule-fqdn>
 ansible-playbook 02_satellite_software_install.yml --limit <capsule-fqdn>
 ansible-playbook 04_capsule_installer.yml --limit <capsule-fqdn>
 
-# 2. Configure Satellite (OS templates, subnets, host groups)
-ansible-playbook 16_satellite_operating_systems.yml
+# 2. Create custom templates and deploy PXE boot configuration
+ansible-playbook 23_satellite_template_deploy.yml --limit <satellite-fqdn>
+
+# 3. Configure Satellite (OS templates, subnets, host groups)
+ansible-playbook 16_satellite_operating_systems.yml --limit <satellite-fqdn>
 ansible-playbook 12_satellite_subnets.yml
 ansible-playbook 18_satellite_host_groups.yml
 
-# 3. Deploy PXE boot configuration
-ansible-playbook 23_satellite_template_deploy.yml
+# 4. Deploy symlinks on the Capsule
+ansible-playbook 23_satellite_template_deploy.yml --limit <capsule-fqdn>
 
-# 4. Sync content to the Capsule
+# 5. Sync content to the Capsule
 ansible-playbook 04b_capsule_content.yml --limit <capsule-fqdn>
 ```
 
@@ -362,6 +437,27 @@ is not associated with the operating system.
 1. Associate `Kickstart default PXEGrub2` with the OS (Step 3)
 2. Run `ansible-playbook 23_satellite_template_deploy.yml` (Step 6)
 
+### GRUB2 searches local /EFI/\<distro\>/grub.cfg and finds nothing
+
+```
+Trying /EFI/fedora/grub.cfg
+error: .../../grub-core/commands/search.c:471:
+  no such device: /EFI/fedora/grub.cfg.
+Trying /EFI/redhat/grub.cfg
+...
+```
+
+**Cause**: GRUB2 loaded successfully but could not fetch `grub.cfg`
+from the HTTP server. It fell back to searching local devices. This
+happens when the DHCP `httpclients` class points shim.efi to
+`/EFI/grub2/` but `grub.cfg` only exists at `/grub2/grub.cfg` (the
+path used by "Build PXE Defaults").
+
+**Fix**: Run `ansible-playbook 23_satellite_template_deploy.yml` against
+the Capsule to create the symlink from
+`/var/lib/tftpboot/EFI/grub2/grub.cfg` to
+`/var/lib/tftpboot/grub2/grub.cfg`.
+
 ### GRUB2 module .lst files not found
 
 ```
@@ -384,6 +480,51 @@ option 59 / vendor class).
 The Capsule's ISC DHCP automatically serves the correct boot file URL
 when managed mode is enabled and the host group uses `Grub2 UEFI HTTP`
 as PXE loader.
+
+### RHSM registration fails with SSL CERTIFICATE_VERIFY_FAILED
+
+**Cause**: The `rhsm` Anaconda addon (RHEL 9+) runs before `%post`, so
+the Satellite CA certificate is not yet installed in the Anaconda
+environment. The addon cannot verify the Satellite/Capsule's SSL
+certificate when attempting to register the host.
+
+**Fix**: Ensure the custom `pvt-kickstart_default` provision template
+is associated with the OS. This template calls the `snt-kickstart_rhsm`
+snippet which includes a `%pre` script that downloads the CA certificate
+from `http://<content_source>/pub/katello-server-ca.crt` before
+registration. Run:
+
+```bash
+ansible-playbook 23_satellite_template_deploy.yml --limit <satellite-fqdn>
+ansible-playbook 16_satellite_operating_systems.yml --limit <satellite-fqdn>
+```
+
+### GRUB2 menu defaults to PXE entry instead of HTTP Boot
+
+**Cause**: The stock `Kickstart default PXEGrub2` template hardcodes
+`set default=0`, which always selects the first (TFTP-based) menu entry
+regardless of the host's PXE loader setting.
+
+**Fix**: Ensure the custom template `pvt-kickstart_default_pxegrub2` is
+being used. Run `ansible-playbook 23_satellite_template_deploy.yml` to
+create/update it, then verify the OS template association in
+`13_operating_systems.yml` references `pvt-kickstart_default_pxegrub2`.
+Rebuild the host config afterwards:
+
+```bash
+hammer host update --name "<host-fqdn>" --build true
+```
+
+### Anaconda fails with "missing inst.stage2 or inst.repo"
+
+**Cause**: The kernel `ip=` parameter has an empty client IP address.
+This happens when `boot_mode: 'Static'` is set on the subnet but the
+host record has no IP assigned. Without network connectivity, Anaconda
+cannot fetch the kickstart file or installer image.
+
+**Fix**: Either assign a static IP to the host (`hammer host update
+--name "<host-fqdn>" --ip "x.x.x.x"`), or change the subnet to
+`boot_mode: 'DHCP'` so Anaconda uses DHCP during installation.
 
 ### Boot works on Satellite network but not on Capsule network
 

@@ -55,7 +55,7 @@ satellite_operatingsystems:
         state: 'present'
 
       - template_kind: 'provision'
-        provisioning_template: 'Kickstart default'
+        provisioning_template: 'pvt-kickstart_default'
         state: 'present'
 
       - template_kind: 'finish'
@@ -72,7 +72,7 @@ satellite_operatingsystems:
         state: 'absent'
 
       - template_kind: 'PXEGrub2'
-        provisioning_template: 'Kickstart default PXEGrub2'
+        provisioning_template: 'pvt-kickstart_default_pxegrub2'
         state: 'present'
 
       - template_kind: 'user_data'
@@ -94,7 +94,7 @@ satellite_operatingsystems:
         state: 'present'
 
       - template_kind: 'provision'
-        provisioning_template: 'Kickstart default'
+        provisioning_template: 'pvt-kickstart_default'
         state: 'present'
 
       - template_kind: 'finish'
@@ -111,7 +111,7 @@ satellite_operatingsystems:
         state: 'absent'
 
       - template_kind: 'PXEGrub2'
-        provisioning_template: 'Kickstart default PXEGrub2'
+        provisioning_template: 'pvt-kickstart_default_pxegrub2'
         state: 'present'
 
       - template_kind: 'user_data'

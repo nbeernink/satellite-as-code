@@ -1,23 +1,236 @@
 ---
-- name: 'Deploy PXE default boot configuration on a Red Hat Satellite'
+- name: 'Deploy PXE default boot configuration'
   hosts: 'all'
   gather_facts: false
   tasks:
 
-    - name: 'Build PXE default templates'
-      ansible.builtin.uri:
-        url: '{{ satellite_server_url }}/api/v2/provisioning_templates/build_pxe_default'
-        method: 'POST'
-        user: '{{ satellite_username }}'
-        password: '{{ satellite_password }}'
-        force_basic_auth: true
-        validate_certs: '{{ satellite_validate_certs | default(false) }}'
-        body_format: 'json'
-        body: '{}'
-        status_code:
-          - 200
-      register: '__t_pxe_default'
+    - name: 'Customize and build PXE templates via Satellite API'
+      when:
+        - satellite_server_url is defined
+        - satellite_username is defined
+        - satellite_password is defined
+      block:
 
-    - name: 'Display PXE default build result'
-      ansible.builtin.debug:
-        var: '__t_pxe_default.json'
+        - name: 'Search for original Kickstart default PXEGrub2 template'
+          ansible.builtin.uri:
+            url: '{{ satellite_server_url }}/api/v2/provisioning_templates?search=name%3D%22Kickstart+default+PXEGrub2%22&per_page=1'
+            method: 'GET'
+            user: '{{ satellite_username }}'
+            password: '{{ satellite_password }}'
+            force_basic_auth: true
+            validate_certs: '{{ satellite_validate_certs | default(false) }}'
+          register: '__t_pxegrub2_search'
+
+        - name: 'Fetch full PXEGrub2 template content'
+          ansible.builtin.uri:
+            url: '{{ satellite_server_url }}/api/v2/provisioning_templates/{{ (__t_pxegrub2_search.json.results | first).id }}'
+            method: 'GET'
+            user: '{{ satellite_username }}'
+            password: '{{ satellite_password }}'
+            force_basic_auth: true
+            validate_certs: '{{ satellite_validate_certs | default(false) }}'
+          register: '__t_pxegrub2_original'
+
+        - name: 'Patch PXEGrub2 template to auto-select HTTP Boot default'
+          vars:
+            __t_default_replacement: |-
+              <% if @host.pxe_loader.to_s =~ /HTTPS/ -%>
+              set default="efi_https"
+              <% elsif @host.pxe_loader.to_s =~ /HTTP/ -%>
+              set default="efi_http"
+              <% else -%>
+              set default=0
+              <% end -%>
+          ansible.builtin.set_fact:
+            __t_pxegrub2_patched: "{{ __t_pxegrub2_original.json.template | regex_replace('set default=0', __t_default_replacement) }}"
+
+        - name: 'Create or update custom PXEGrub2 template'
+          redhat.satellite.provisioning_template:
+            username: '{{ satellite_username }}'
+            password: '{{ satellite_password }}'
+            server_url: '{{ satellite_server_url }}'
+            validate_certs: '{{ satellite_validate_certs | default(false) }}'
+            name: 'pvt-kickstart_default_pxegrub2'
+            kind: 'PXEGrub2'
+            template: '{{ __t_pxegrub2_patched }}'
+            operatingsystems: "{{ satellite_operatingsystems | default([]) | map(attribute='description') | list }}"
+            organizations:
+              - '{{ satellite_organization }}'
+            locations:
+              - '{{ satellite_location }}'
+            state: 'present'
+
+        - name: 'Search for original kickstart_rhsm snippet'
+          ansible.builtin.uri:
+            url: '{{ satellite_server_url }}/api/v2/provisioning_templates?search=name%3D%22kickstart_rhsm%22&per_page=1'
+            method: 'GET'
+            user: '{{ satellite_username }}'
+            password: '{{ satellite_password }}'
+            force_basic_auth: true
+            validate_certs: '{{ satellite_validate_certs | default(false) }}'
+          register: '__t_rhsm_search'
+
+        - name: 'Fetch full kickstart_rhsm snippet content'
+          ansible.builtin.uri:
+            url: '{{ satellite_server_url }}/api/v2/provisioning_templates/{{ (__t_rhsm_search.json.results | first).id }}'
+            method: 'GET'
+            user: '{{ satellite_username }}'
+            password: '{{ satellite_password }}'
+            force_basic_auth: true
+            validate_certs: '{{ satellite_validate_certs | default(false) }}'
+          register: '__t_rhsm_original'
+
+        - name: 'Build patched kickstart_rhsm with CA cert pre-install'
+          vars:
+            __t_ca_pre_block: |-
+              <% if plugin_present?('katello') && @host.content_source && subman_registration -%>
+              %pre --log=/tmp/foreman_rhsm_ca.log --erroronfail
+              curl -so /etc/rhsm/ca/katello-server-ca.pem http://<%= @host.content_source.hostname %>/pub/katello-server-ca.crt
+              cp /etc/rhsm/ca/katello-server-ca.pem /etc/pki/ca-trust/source/anchors/
+              update-ca-trust
+              %end
+              <% end -%>
+              <% if subman_registration -%>
+          ansible.builtin.set_fact:
+            __t_rhsm_patched: "{{ __t_rhsm_original.json.template | replace('name: kickstart_rhsm', 'name: snt-kickstart_rhsm') | replace('<% if subman_registration -%>', __t_ca_pre_block) }}"
+
+        - name: 'Check if custom kickstart_rhsm snippet exists'
+          ansible.builtin.uri:
+            url: '{{ satellite_server_url }}/api/v2/provisioning_templates?search=name%3D%22snt-kickstart_rhsm%22&per_page=1'
+            method: 'GET'
+            user: '{{ satellite_username }}'
+            password: '{{ satellite_password }}'
+            force_basic_auth: true
+            validate_certs: '{{ satellite_validate_certs | default(false) }}'
+          register: '__t_rhsm_custom_search'
+
+        - name: 'Extract custom snippet ID if it exists'
+          ansible.builtin.set_fact:
+            __t_rhsm_custom_id: "{{ (__t_rhsm_custom_search.json.results | map(attribute='id') | list + [''])[0] }}"
+
+        - name: 'Create custom kickstart_rhsm snippet'
+          when: "__t_rhsm_custom_id == ''"
+          ansible.builtin.uri:
+            url: '{{ satellite_server_url }}/api/v2/provisioning_templates'
+            method: 'POST'
+            user: '{{ satellite_username }}'
+            password: '{{ satellite_password }}'
+            force_basic_auth: true
+            validate_certs: '{{ satellite_validate_certs | default(false) }}'
+            body_format: 'json'
+            body:
+              provisioning_template:
+                name: 'snt-kickstart_rhsm'
+                template: '{{ __t_rhsm_patched }}'
+                snippet: true
+                locked: false
+            status_code:
+              - 201
+              - 200
+
+        - name: 'Update custom kickstart_rhsm snippet'
+          when: "__t_rhsm_custom_id != ''"
+          ansible.builtin.uri:
+            url: '{{ satellite_server_url }}/api/v2/provisioning_templates/{{ __t_rhsm_custom_id }}'
+            method: 'PUT'
+            user: '{{ satellite_username }}'
+            password: '{{ satellite_password }}'
+            force_basic_auth: true
+            validate_certs: '{{ satellite_validate_certs | default(false) }}'
+            body_format: 'json'
+            body:
+              provisioning_template:
+                template: '{{ __t_rhsm_patched }}'
+            status_code:
+              - 200
+
+        - name: 'Search for original Kickstart default provision template'
+          ansible.builtin.uri:
+            url: '{{ satellite_server_url }}/api/v2/provisioning_templates?search=name%3D%22Kickstart+default%22&per_page=1'
+            method: 'GET'
+            user: '{{ satellite_username }}'
+            password: '{{ satellite_password }}'
+            force_basic_auth: true
+            validate_certs: '{{ satellite_validate_certs | default(false) }}'
+          register: '__t_provision_search'
+
+        - name: 'Fetch full Kickstart default provision template content'
+          ansible.builtin.uri:
+            url: '{{ satellite_server_url }}/api/v2/provisioning_templates/{{ (__t_provision_search.json.results | first).id }}'
+            method: 'GET'
+            user: '{{ satellite_username }}'
+            password: '{{ satellite_password }}'
+            force_basic_auth: true
+            validate_certs: '{{ satellite_validate_certs | default(false) }}'
+          register: '__t_provision_original'
+
+        - name: 'Patch Kickstart default to use custom kickstart_rhsm snippet'
+          ansible.builtin.set_fact:
+            __t_provision_patched: "{{ __t_provision_original.json.template | replace(\"snippet('kickstart_rhsm')\", \"snippet('snt-kickstart_rhsm')\") }}"
+
+        - name: 'Create or update custom Kickstart default provision template'
+          redhat.satellite.provisioning_template:
+            username: '{{ satellite_username }}'
+            password: '{{ satellite_password }}'
+            server_url: '{{ satellite_server_url }}'
+            validate_certs: '{{ satellite_validate_certs | default(false) }}'
+            name: 'pvt-kickstart_default'
+            kind: 'provision'
+            template: '{{ __t_provision_patched }}'
+            operatingsystems: "{{ satellite_operatingsystems | default([]) | map(attribute='description') | list }}"
+            organizations:
+              - '{{ satellite_organization }}'
+            locations:
+              - '{{ satellite_location }}'
+            state: 'present'
+
+        - name: 'Build PXE default templates'
+          ansible.builtin.uri:
+            url: '{{ satellite_server_url }}/api/v2/provisioning_templates/build_pxe_default'
+            method: 'POST'
+            user: '{{ satellite_username }}'
+            password: '{{ satellite_password }}'
+            force_basic_auth: true
+            validate_certs: '{{ satellite_validate_certs | default(false) }}'
+            body_format: 'json'
+            body: '{}'
+            status_code:
+              - 200
+          register: '__t_pxe_default'
+
+        - name: 'Display PXE default build result'
+          ansible.builtin.debug:
+            var: '__t_pxe_default.json'
+
+    - name: 'Check if PXE default grub.cfg exists'
+      become: true
+      ansible.builtin.stat:
+        path: '/var/lib/tftpboot/grub2/grub.cfg'
+      register: '__t_grub_cfg'
+
+    - name: 'Ensure HTTP Boot grub.cfg symlinks on TFTP servers'
+      become: true
+      when: __t_grub_cfg.stat.exists
+      block:
+
+        - name: 'Ensure EFI directories exist for HTTP Boot'
+          ansible.builtin.file:
+            path: '{{ item }}'
+            state: 'directory'
+            owner: 'foreman-proxy'
+            group: 'root'
+            mode: '0755'
+          loop:
+            - '/var/lib/tftpboot/EFI'
+            - '/var/lib/tftpboot/EFI/grub2'
+            - '/var/lib/tftpboot/EFI/redhat'
+
+        - name: 'Symlink grub.cfg into EFI HTTP Boot paths'
+          ansible.builtin.file:
+            src: '/var/lib/tftpboot/grub2/grub.cfg'
+            dest: '{{ item }}'
+            state: 'link'
+            force: true
+          loop:
+            - '/var/lib/tftpboot/EFI/grub2/grub.cfg'
+            - '/var/lib/tftpboot/EFI/redhat/grub.cfg'
