@@ -8,6 +8,15 @@ Every aspect of the Satellite configuration is expressed as code: playbooks
 handle orchestration, while all environment-specific values live in
 `host_vars` files, enabling clean separation between logic and data.
 
+## Documentation
+
+Detailed guides for specific topics live in the [`docs/`](docs/) folder:
+
+- [HTTP Boot Provisioning](docs/httpboot.md) -- configuring UEFI HTTP
+  Boot with Satellite and Capsule
+- [Housekeeping](docs/housekeeping.md) -- detecting and removing
+  orphaned resources (configuration drift)
+
 ## Getting Started
 
 ### 1. Install Ansible on the Control Node
@@ -246,6 +255,8 @@ ansible-playbook 03_satellite_installer.yml
 ├── 20_satellite_openscap.yml
 ├── 21_satellite_role.yml
 ├── 22_satellite_users.yml
+├── 23_satellite_template_deploy.yml  # Build PXE default boot configuration
+├── 24_satellite_housekeeping.yml     # Detect and remove orphaned resources
 ├── inventory                         # Static inventory
 ├── ansible.cfg
 ├── collections/
@@ -280,6 +291,9 @@ ansible-playbook 03_satellite_installer.yml
 │       ├── 14_activation_keys.yml
 │       ├── 15a-15d_host_groups_*.yml # Host groups (layered hierarchy)
 │       ├── 16a-16d_global_parameters_*.yml
+├── docs/
+│   ├── httpboot.md                  # HTTP Boot provisioning guide
+│   └── housekeeping.md              # Configuration drift detection
 │       ├── 17_openscap.yml
 │       ├── 18_roles.yml
 │       └── 19_users
@@ -326,6 +340,10 @@ ansible-playbook 15_satellite_settings.yml
 20  Configure OpenSCAP (compliance policies)
 21  Create Satellite roles
 22  Create Satellite users
+        │
+23  Build PXE default boot configuration (deploys GRUB2/PXELinux files to proxies)
+        │
+24  Housekeeping (detect and remove orphaned host groups, subnets, domains)
 ```
 
 ### Capsule Installation
@@ -452,19 +470,28 @@ ansible-playbook 04_capsule_installer.yml --limit <capsule-fqdn>
 Host groups follow a layered structure for maximum reusability:
 
 ```
-hg-base                              # Architecture, Ansible roles
-├── hg-rhel-8                        # OS, PXE loader, partition table
+hg-base                                # Architecture, Ansible roles
+├── hg-rhel-8                          # OS, PXE loader (PXELinux UEFI), ptable
 │   ├── hg-ansible_automation_platform-rhel-8
-│   │   ├── ...-dev                  # Lifecycle env, content view, activation key
+│   │   ├── ...-dev                    # Lifecycle env, content view, activation key
 │   │   └── ...-prod
 │   └── hg-default-rhel-8
 │       ├── ...-dev
 │       └── ...-prod
 ├── hg-rhel-9
 │   └── (same pattern)
-└── hg-rhel-10
-    └── (same pattern)
+├── hg-rhel-10
+│   └── (same pattern)
+├── hg-httpboot-rhel-9                 # OS, PXE loader (Grub2 UEFI HTTP), ptable
+│   ├── hg-httpboot-rhel-9-dev         # deploy.crazy.lab, Capsule as content source
+│   └── hg-httpboot-rhel-9-prod
+└── hg-httpboot-rhel-10
+    ├── hg-httpboot-rhel-10-dev
+    └── hg-httpboot-rhel-10-prod
 ```
+
+See [HTTP Boot Provisioning](docs/httpboot.md) for details on the
+HTTP Boot host group configuration.
 
 ## Running on Ansible Automation Platform (AAP)
 

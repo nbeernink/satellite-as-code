@@ -1,0 +1,182 @@
+---
+- name: 'Satellite housekeeping - detect and remove orphaned resources'
+  hosts: 'all'
+  gather_facts: false
+  vars:
+    satellite_housekeeping_enforce: false
+  tasks:
+
+    # ================================================================
+    # Host Groups
+    # ================================================================
+
+    - name: 'Fetch all host groups from Satellite'
+      redhat.satellite.resource_info:
+        username: '{{ satellite_username }}'
+        password: '{{ satellite_password }}'
+        server_url: '{{ satellite_server_url }}'
+        validate_certs: '{{ satellite_validate_certs | default(false) }}'
+        resource: 'hostgroups'
+        organization: '{{ satellite_organization }}'
+      register: '__t_hg_satellite'
+
+    - name: 'Build expected host group titles from repository'
+      ansible.builtin.set_fact:
+        __t_hg_expected_titles: >-
+          {{
+            [((item.parent + '/' + item.name)
+              if ('parent' in item and item.parent | length > 0)
+              else item.name)
+            for item in satellite_hostgroups | default([])]
+          }}
+
+    - name: 'Identify orphaned host groups'
+      ansible.builtin.set_fact:
+        __t_hg_orphaned: >-
+          {{ __t_hg_satellite.resources |
+             map(attribute='title') |
+             reject('in', __t_hg_expected_titles) |
+             sort(reverse=true) | list }}
+
+    - name: 'Report orphaned host groups'
+      ansible.builtin.debug:
+        msg: >-
+          {{ __t_hg_orphaned | length }} orphaned host group(s):
+          {{ __t_hg_orphaned | join(', ') }}
+      when: __t_hg_orphaned | length > 0
+
+    - name: 'Host groups are in sync'
+      ansible.builtin.debug:
+        msg: 'All host groups in Satellite match the repository definition.'
+      when: __t_hg_orphaned | length == 0
+
+    - name: 'Remove orphaned host groups (deepest first)'
+      redhat.satellite.hostgroup:
+        username: '{{ satellite_username }}'
+        password: '{{ satellite_password }}'
+        server_url: '{{ satellite_server_url }}'
+        validate_certs: '{{ satellite_validate_certs | default(false) }}'
+        name: "{{ item.split('/')[-1] }}"
+        parent: "{{ item.split('/')[:-1] | join('/') | default(omit, true) }}"
+        organization: '{{ satellite_organization }}'
+        state: 'absent'
+      loop: '{{ __t_hg_orphaned }}'
+      loop_control:
+        label: '{{ item }}'
+      when:
+        - satellite_housekeeping_enforce | bool
+        - __t_hg_orphaned | length > 0
+
+    # ================================================================
+    # Subnets
+    # ================================================================
+
+    - name: 'Fetch all subnets from Satellite'
+      redhat.satellite.resource_info:
+        username: '{{ satellite_username }}'
+        password: '{{ satellite_password }}'
+        server_url: '{{ satellite_server_url }}'
+        validate_certs: '{{ satellite_validate_certs | default(false) }}'
+        resource: 'subnets'
+      register: '__t_sn_satellite'
+
+    - name: 'Identify orphaned subnets'
+      ansible.builtin.set_fact:
+        __t_sn_orphaned: >-
+          {{ __t_sn_satellite.resources |
+             map(attribute='name') |
+             reject('in', satellite_subnets | default([]) |
+               map(attribute='name') | list) |
+             list }}
+
+    - name: 'Report orphaned subnets'
+      ansible.builtin.debug:
+        msg: >-
+          {{ __t_sn_orphaned | length }} orphaned subnet(s):
+          {{ __t_sn_orphaned | join(', ') }}
+      when: __t_sn_orphaned | length > 0
+
+    - name: 'Subnets are in sync'
+      ansible.builtin.debug:
+        msg: 'All subnets in Satellite match the repository definition.'
+      when: __t_sn_orphaned | length == 0
+
+    - name: 'Remove orphaned subnets'
+      redhat.satellite.subnet:
+        username: '{{ satellite_username }}'
+        password: '{{ satellite_password }}'
+        server_url: '{{ satellite_server_url }}'
+        validate_certs: '{{ satellite_validate_certs | default(false) }}'
+        name: '{{ item }}'
+        state: 'absent'
+      loop: '{{ __t_sn_orphaned }}'
+      loop_control:
+        label: '{{ item }}'
+      when:
+        - satellite_housekeeping_enforce | bool
+        - __t_sn_orphaned | length > 0
+
+    # ================================================================
+    # Domains
+    # ================================================================
+
+    - name: 'Fetch all domains from Satellite'
+      redhat.satellite.resource_info:
+        username: '{{ satellite_username }}'
+        password: '{{ satellite_password }}'
+        server_url: '{{ satellite_server_url }}'
+        validate_certs: '{{ satellite_validate_certs | default(false) }}'
+        resource: 'domains'
+      register: '__t_dm_satellite'
+
+    - name: 'Identify orphaned domains'
+      ansible.builtin.set_fact:
+        __t_dm_orphaned: >-
+          {{ __t_dm_satellite.resources |
+             map(attribute='name') |
+             reject('in', satellite_domains | default([]) |
+               map(attribute='name') | list) |
+             list }}
+
+    - name: 'Report orphaned domains'
+      ansible.builtin.debug:
+        msg: >-
+          {{ __t_dm_orphaned | length }} orphaned domain(s):
+          {{ __t_dm_orphaned | join(', ') }}
+      when: __t_dm_orphaned | length > 0
+
+    - name: 'Domains are in sync'
+      ansible.builtin.debug:
+        msg: 'All domains in Satellite match the repository definition.'
+      when: __t_dm_orphaned | length == 0
+
+    - name: 'Remove orphaned domains'
+      redhat.satellite.domain:
+        username: '{{ satellite_username }}'
+        password: '{{ satellite_password }}'
+        server_url: '{{ satellite_server_url }}'
+        validate_certs: '{{ satellite_validate_certs | default(false) }}'
+        name: '{{ item }}'
+        state: 'absent'
+      loop: '{{ __t_dm_orphaned }}'
+      loop_control:
+        label: '{{ item }}'
+      when:
+        - satellite_housekeeping_enforce | bool
+        - __t_dm_orphaned | length > 0
+
+    # ================================================================
+    # Summary
+    # ================================================================
+
+    - name: 'Housekeeping summary'
+      ansible.builtin.debug:
+        msg:
+          - '--- Satellite Housekeeping Summary ---'
+          - 'Host groups : {{ __t_hg_orphaned | length }} orphaned (of {{ __t_hg_satellite.resources | length }} total)'
+          - 'Subnets     : {{ __t_sn_orphaned | length }} orphaned (of {{ __t_sn_satellite.resources | length }} total)'
+          - 'Domains     : {{ __t_dm_orphaned | length }} orphaned (of {{ __t_dm_satellite.resources | length }} total)'
+          - ''
+          - "{{ 'ENFORCE MODE: Orphaned resources have been removed.'
+                if (satellite_housekeeping_enforce | bool)
+                else 'DRY RUN: No changes made. Re-run with -e satellite_housekeeping_enforce=true to remove orphans.' }}"

@@ -27,11 +27,12 @@ satellite_subnets:
     gateway: '172.16.80.254'
     boot_mode: 'Static'
     ipam: 'None'
-    tftp_proxy: '{{ inventory_hostname }}'
-    template_proxy: '{{ inventory_hostname }}'
+    tftp_proxy: 'lab-capsule-6.deploy.crazy.lab'
+    httpboot_proxy: 'lab-capsule-6.deploy.crazy.lab'
+    template_proxy: 'lab-capsule-6.deploy.crazy.lab'
     discovery_proxy: '{{ inventory_hostname }}'
     remote_execution_proxies:
-      - '{{ inventory_hostname }}'
+      - 'lab-capsule-6.deploy.crazy.lab'
     dns_primary: '172.16.80.1'
     domains:
       - 'deploy.crazy.lab'

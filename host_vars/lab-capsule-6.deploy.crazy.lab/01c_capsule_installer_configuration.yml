@@ -58,6 +58,7 @@ satellite_installer_options:
   # TFTP and HTTPBoot
   - '--foreman-proxy-tftp true'
   - '--foreman-proxy-tftp-servername {{ inventory_hostname }}'
+  - '--foreman-proxy-tftp-listen-on both'
   - '--foreman-proxy-httpboot true'
   - '--foreman-proxy-http true'
   - '--foreman-proxy-templates true'

@@ -72,7 +72,8 @@ satellite_operatingsystems:
         state: 'absent'
 
       - template_kind: 'PXEGrub2'
-        state: 'absent'
+        provisioning_template: 'Kickstart default PXEGrub2'
+        state: 'present'
 
       - template_kind: 'user_data'
         state: 'absent'
@@ -110,7 +111,8 @@ satellite_operatingsystems:
         state: 'absent'
 
       - template_kind: 'PXEGrub2'
-        state: 'absent'
+        provisioning_template: 'Kickstart default PXEGrub2'
+        state: 'present'
 
       - template_kind: 'user_data'
         state: 'absent'

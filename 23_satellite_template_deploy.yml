@@ -1,0 +1,23 @@
+---
+- name: 'Deploy PXE default boot configuration on a Red Hat Satellite'
+  hosts: 'all'
+  gather_facts: false
+  tasks:
+
+    - name: 'Build PXE default templates'
+      ansible.builtin.uri:
+        url: '{{ satellite_server_url }}/api/v2/provisioning_templates/build_pxe_default'
+        method: 'POST'
+        user: '{{ satellite_username }}'
+        password: '{{ satellite_password }}'
+        force_basic_auth: true
+        validate_certs: '{{ satellite_validate_certs | default(false) }}'
+        body_format: 'json'
+        body: '{}'
+        status_code:
+          - 200
+      register: '__t_pxe_default'
+
+    - name: 'Display PXE default build result'
+      ansible.builtin.debug:
+        var: '__t_pxe_default.json'
