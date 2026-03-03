@@ -16,6 +16,11 @@ sat_global_parameters_general:
     hidden_value: false
     value: 'Europe/Berlin'
 
+  - name: 'host_registration_insights'
+    parameter_type: 'boolean'
+    hidden_value: false
+    value: false
+
   - name: 'p-enable_fips_deployment'
     parameter_type: 'boolean'
     hidden_value: true

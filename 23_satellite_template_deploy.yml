@@ -172,9 +172,49 @@
             validate_certs: '{{ satellite_validate_certs | default(false) }}'
           register: '__t_provision_original'
 
-        - name: 'Patch Kickstart default to use custom kickstart_rhsm snippet'
+        - name: 'Create or update snt-post_insights_registration snippet'
+          vars:
+            __t_insights_snippet: |
+              <%#
+              kind: snippet
+              name: snt-post_insights_registration
+              model: ProvisioningTemplate
+              snippet: true
+              description: |
+                Register the host with Red Hat Insights through Satellite.
+                Runs in %post after RHSM registration is complete.
+                Set global param host_registration_insights=false to
+                disable Anaconda's built-in ConnectToInsightsTask which
+                cannot auto-detect the Satellite route.
+              -%>
+              <% if plugin_present?('katello') && @host.content_source -%>
+              if command -v insights-client > /dev/null 2>&1; then
+                echo "Registering with Red Hat Insights through Satellite..."
+                insights-client --register 2>&1 || echo "WARNING: Insights registration deferred to post-boot"
+              fi
+              <% end -%>
+          redhat.satellite.provisioning_template:
+            username: '{{ satellite_username }}'
+            password: '{{ satellite_password }}'
+            server_url: '{{ satellite_server_url }}'
+            validate_certs: '{{ satellite_validate_certs | default(false) }}'
+            name: 'snt-post_insights_registration'
+            kind: 'snippet'
+            template: '{{ __t_insights_snippet }}'
+            organizations:
+              - '{{ satellite_organization }}'
+            locations:
+              - '{{ satellite_location }}'
+            state: 'present'
+
+        - name: 'Patch Kickstart default to use custom snippets'
+          vars:
+            __t_insights_include: "<%= snippet('snt-post_insights_registration') %>"
           ansible.builtin.set_fact:
-            __t_provision_patched: "{{ __t_provision_original.json.template | replace(\"snippet('kickstart_rhsm')\", \"snippet('snt-kickstart_rhsm')\") }}"
+            __t_provision_patched: >-
+              {{ __t_provision_original.json.template
+                 | replace("snippet('kickstart_rhsm')", "snippet('snt-kickstart_rhsm')")
+                 | replace("touch /tmp/foreman_built", __t_insights_include + "\ntouch /tmp/foreman_built") }}
 
         - name: 'Create or update custom Kickstart default provision template'
           redhat.satellite.provisioning_template:

@@ -119,3 +119,12 @@
       ansible.builtin.dnf:
         name: '{{ sat_package_name }}'
         state: 'present'
+
+    - name: 'Deploy custom Hiera overrides for satellite-installer'
+      when: satellite_installer_custom_hiera is defined
+      ansible.builtin.copy:
+        content: '{{ satellite_installer_custom_hiera | to_nice_yaml(indent=2) }}'
+        dest: '/etc/foreman-installer/custom-hiera.yaml'
+        owner: 'root'
+        group: 'root'
+        mode: '0600'

@@ -63,3 +63,15 @@ satellite_installer_options:
   - '--foreman-proxy-http true'
   - '--foreman-proxy-templates true'
   - '--enable-foreman-proxy-plugin-remote-execution-script'
+
+# --------------------------------------------------------------------------
+# Custom Hiera overrides for satellite-installer
+# --------------------------------------------------------------------------
+# Deployed to /etc/foreman-installer/custom-hiera.yaml before
+# the installer runs.  This is the Red Hat supported mechanism
+# to tune Puppet class parameters that have no dedicated
+# installer CLI flag.
+satellite_installer_custom_hiera:
+  dns::allow_recursion:
+    - 'localhost'
+    - '172.16.80.0/24'
