@@ -84,10 +84,18 @@
           vars:
             __t_ca_pre_block: |-
               <% if plugin_present?('katello') && @host.content_source && subman_registration -%>
-              %pre --log=/tmp/foreman_rhsm_ca.log --erroronfail
+              %pre --log=/tmp/foreman_rhsm_ca.log
+              set -x
+              mkdir -p /etc/rhsm/ca
+              mkdir -p /etc/pki/ca-trust/source/anchors
               curl -so /etc/rhsm/ca/katello-server-ca.pem http://<%= @host.content_source.hostname %>/pub/katello-server-ca.crt
+              curl -so /etc/rhsm/ca/custom-ca-chain.pem http://<%= @host.content_source.hostname %>/pub/custom-ca-chain.pem
+              cat /etc/rhsm/ca/katello-server-ca.pem /etc/rhsm/ca/custom-ca-chain.pem > /etc/rhsm/ca/redhat-uep.pem
+              cp /etc/rhsm/ca/custom-ca-chain.pem /etc/pki/ca-trust/source/anchors/
               cp /etc/rhsm/ca/katello-server-ca.pem /etc/pki/ca-trust/source/anchors/
-              update-ca-trust
+              update-ca-trust || true
+              sed -i "s|^repo_ca_cert\s*=.*|repo_ca_cert = /etc/rhsm/ca/katello-server-ca.pem|" /etc/rhsm/rhsm.conf || true
+              command -v openssl > /dev/null && openssl rehash /etc/rhsm/ca/ || true
               %end
               <% end -%>
               <% if subman_registration -%>
@@ -201,6 +209,17 @@
         - name: 'Display PXE default build result'
           ansible.builtin.debug:
             var: '__t_pxe_default.json'
+
+    - name: 'Publish custom CA chain for HTTP Boot provisioning'
+      become: true
+      when: sat_certs_ca_bundle is defined and sat_cert_dest_path is defined
+      ansible.builtin.copy:
+        src: '{{ sat_cert_dest_path }}/{{ sat_certs_ca_bundle | basename }}'
+        dest: '/var/www/html/pub/custom-ca-chain.pem'
+        remote_src: true
+        owner: 'root'
+        group: 'root'
+        mode: '0644'
 
     - name: 'Check if PXE default grub.cfg exists'
       become: true

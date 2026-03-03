@@ -2,4 +2,5 @@
 # Merging all Global Parameters
 sat_global_parameters: '{{ sat_global_parameters_ansible_provisioning +
                            sat_global_parameters_remote_execution +
+                           sat_global_parameters_provisioning_users +
                            sat_global_parameters_general }}'

@@ -1,0 +1,30 @@
+---
+# Global Parameters for provisioning user accounts and SSH keys.
+# These users are created during kickstart %post via the
+# snt-post_create_users snippet.
+#
+# The remote-satellite user is already created by Satellite's
+# remote_execution_ssh_keys snippet. Only additional SSH keys
+# are deployed here (the foreman-proxy keys are managed
+# automatically by Satellite).
+sat_global_parameters_provisioning_users:
+  - name: 'p-provisioning_users'
+    parameter_type: 'yaml'
+    hidden_value: false
+    value:
+      - name: 'cloud-user'
+        uid: 1000
+        gid: 1000
+        comment: 'Cloud User'
+        shell: '/bin/bash'
+        sudo: true
+        ssh_authorized_keys:
+          - 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKCCBDsoON+yG9L23/bLly8UqRxCqa1oBXd2rP324Bvy sfroemer@redhat.com'
+          - 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBpjnZ2aQzHI+85q8w8Z9M4VqgnPDDq1UovqUqyFlsRt AAP Lab SSH Key'
+          - 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBtaWIrfuRNoc/n/id155PZkbMZv/kSour3tUQrsUS2M sfroemer@redhat.com'
+          - 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDMTLjX+FQehKxVx6OC17BsZNZP+jMTD8g3ap+9PRwfP lab-aap@crazy.lab'
+
+      - name: 'remote-satellite'
+        create: false
+        ssh_authorized_keys:
+          - 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAID87T6Ay4c6r03kPXGvnXy7C65yoCrQurjX2v6S6pN0b Remote Satellite SSH Key'
