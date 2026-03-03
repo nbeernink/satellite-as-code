@@ -13,7 +13,9 @@ handle orchestration, while all environment-specific values live in
 Detailed guides for specific topics live in the [`docs/`](docs/) folder:
 
 - [HTTP Boot Provisioning](docs/httpboot.md) -- configuring UEFI HTTP
-  Boot with Satellite and Capsule
+  Boot with Satellite and Capsule (Ansible version)
+- [HTTP Boot Manual Setup](docs/httpboot-manual.md) -- same steps using
+  `hammer` CLI, API calls, and UI (no Ansible required)
 - [Housekeeping](docs/housekeeping.md) -- detecting and removing
   orphaned resources (configuration drift)
 
@@ -292,7 +294,8 @@ ansible-playbook 03_satellite_installer.yml
 │       ├── 15a-15d_host_groups_*.yml # Host groups (layered hierarchy)
 │       ├── 16a-16d_global_parameters_*.yml
 ├── docs/
-│   ├── httpboot.md                  # HTTP Boot provisioning guide
+│   ├── httpboot.md                  # HTTP Boot provisioning guide (Ansible)
+│   ├── httpboot-manual.md           # HTTP Boot manual setup (hammer/API/UI)
 │   └── housekeeping.md              # Configuration drift detection
 │       ├── 17_openscap.yml
 │       ├── 18_roles.yml

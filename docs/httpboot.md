@@ -3,6 +3,10 @@
 This guide covers the end-to-end configuration required to provision hosts
 using UEFI HTTP Boot through a Red Hat Satellite Capsule.
 
+> **Looking for the non-Ansible version?** See
+> [httpboot-manual.md](httpboot-manual.md) for the same steps using
+> `hammer` CLI, Satellite API, and web UI.
+
 ## Overview
 
 HTTP Boot is a UEFI firmware feature that replaces traditional PXE (TFTP)

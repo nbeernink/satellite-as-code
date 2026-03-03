@@ -9,7 +9,7 @@ sat_global_parameters_general:
   - name: 'keyboard'
     parameter_type: 'string'
     hidden_value: false
-    value: 'de'
+    value: 'us'
 
   - name: 'time-zone'
     parameter_type: 'string'

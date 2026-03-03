@@ -44,7 +44,7 @@ satellite_installer_options:
   - '--foreman-proxy-dhcp-managed true'
   - '--foreman-proxy-dhcp-interface eth0'
   - '--foreman-proxy-dhcp-gateway 172.16.80.254'
-  - '--foreman-proxy-dhcp-nameservers 172.16.80.2'
+  - '--foreman-proxy-dhcp-nameservers 172.16.80.1'
   - '--foreman-proxy-dhcp-range "172.16.80.100 172.16.80.200"'
   - '--foreman-proxy-dhcp-network 172.16.80.0'
   - '--foreman-proxy-dhcp-netmask 255.255.255.0'
@@ -54,7 +54,7 @@ satellite_installer_options:
   - '--foreman-proxy-dns-zone deploy.crazy.lab'
   - '--foreman-proxy-dns-reverse 80.16.172.in-addr.arpa'
   - '--foreman-proxy-dns-interface eth0'
-  - '--foreman-proxy-dns-forwarders 172.16.80.1'
+  - '--foreman-proxy-dns-forwarders 172.16.80.254'
   # TFTP and HTTPBoot
   - '--foreman-proxy-tftp true'
   - '--foreman-proxy-tftp-servername {{ inventory_hostname }}'
