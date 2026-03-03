@@ -91,6 +91,30 @@ Run the Capsule installer playbook to apply:
 ansible-playbook 04_capsule_installer.yml --limit <capsule-fqdn>
 ```
 
+#### DNS Recursion for the Deploy Subnet
+
+By default, the `satellite-installer` configures BIND with
+`allow_recursion: ['none']`. This means BIND is authoritative for
+`deploy.crazy.lab` but **denies** all recursive queries. Clients on the
+deploy subnet that use the Capsule as their nameserver (via DHCP) will
+fail to resolve external names (e.g. `cert-api.access.redhat.com`).
+
+The fix is a custom Hiera override in
+`host_vars/<capsule-fqdn>/01c_capsule_installer_configuration.yml`:
+
+```yaml
+satellite_installer_custom_hiera:
+  dns::allow_recursion:
+    - 'localhost'
+    - '172.16.80.0/24'
+```
+
+The Capsule installer playbook (`04_capsule_installer.yml`) deploys this
+to `/etc/foreman-installer/custom-hiera.yaml` before the installer runs.
+Custom Hiera is the Red Hat supported mechanism for tuning Puppet class
+parameters that have no dedicated installer CLI flag -- it persists
+across future `satellite-installer` runs.
+
 ### Step 2: Firewall -- Open Port 8000
 
 The Capsule firewall must allow TCP port 8000 for HTTP Boot. Configure
@@ -293,7 +317,7 @@ must generate the global PXE boot files and push them to the smart
 proxies. This creates the GRUB2 directory tree (`shim.efi`, `grub.cfg`,
 module `.lst` files) on each proxy's HTTP Boot root.
 
-The `23_satellite_template_deploy.yml` playbook performs five tasks:
+The `23_satellite_template_deploy.yml` playbook performs six tasks:
 
 1. **Creates `pvt-kickstart_default_pxegrub2`** (PXEGrub2 template) --
    fetches the stock `Kickstart default PXEGrub2`, patches the
@@ -305,12 +329,23 @@ The `23_satellite_template_deploy.yml` playbook performs five tasks:
    Without this, RHSM registration fails with an SSL certificate
    verification error because the Anaconda environment does not trust
    the Satellite's internal CA.
-3. **Creates `pvt-kickstart_default`** (provision template) -- fetches
-   the stock `Kickstart default` and replaces the `kickstart_rhsm`
-   snippet call with `snt-kickstart_rhsm`.
-4. **Builds PXE defaults** via the Satellite API, generating the global
+3. **Creates `snt-post_insights_registration`** (snippet) -- registers
+   the host with Red Hat Insights in kickstart `%post`. At this stage
+   RHSM is fully configured, so `insights-client --register` with
+   `auto_config=True` correctly detects the Satellite/Capsule and
+   routes Insights data through it instead of trying Red Hat CDN
+   directly. This replaces Anaconda's built-in `ConnectToInsightsTask`
+   which cannot auto-detect the Satellite route and fails with 401.
+   The global parameter `host_registration_insights=false` disables the
+   broken built-in task.
+4. **Creates `pvt-kickstart_default`** (provision template) -- fetches
+   the stock `Kickstart default`, replaces the `kickstart_rhsm`
+   snippet call with `snt-kickstart_rhsm`, and injects the
+   `snt-post_insights_registration` snippet before `touch
+   /tmp/foreman_built`.
+5. **Builds PXE defaults** via the Satellite API, generating the global
    boot files on all smart proxies.
-5. **Creates symlinks** on TFTP servers to bridge the path mismatch
+6. **Creates symlinks** on TFTP servers to bridge the path mismatch
    between where DHCP tells clients to look (`/EFI/grub2/`) and where
    "Build PXE Defaults" places `grub.cfg` (`/grub2/`).
 
@@ -529,6 +564,47 @@ cannot fetch the kickstart file or installer image.
 **Fix**: Either assign a static IP to the host (`hammer host update
 --name "<host-fqdn>" --ip "x.x.x.x"`), or change the subnet to
 `boot_mode: 'DHCP'` so Anaconda uses DHCP during installation.
+
+### DNS queries denied on the Capsule (query (cache) ... denied)
+
+```
+named: client 172.16.80.x: query (cache) 'example.com/A/IN' denied
+```
+
+**Cause**: BIND on the Capsule denies recursive queries from the deploy
+subnet. The `satellite-installer` defaults to
+`allow_recursion: ['none']`, so BIND only answers authoritatively for
+`deploy.crazy.lab` and rejects lookups for external domains.
+
+**Fix**: Add a custom Hiera override (see Step 1, "DNS Recursion for
+the Deploy Subnet"). Apply with:
+
+```bash
+ansible-playbook 04_capsule_installer.yml --limit <capsule-fqdn>
+```
+
+### Insights registration fails with InsightsConnectError during Anaconda
+
+```
+InsightsConnectError: Failed to connect to Red Hat Insights.
+Upload archive failed with status code 401
+```
+
+**Cause**: Anaconda's built-in `ConnectToInsightsTask` tries to reach
+`cert-api.access.redhat.com` directly using Satellite-issued identity
+certificates. Red Hat CDN rejects these with 401 because the host is
+registered through Satellite, not directly.
+
+**Fix**: Set the global parameter `host_registration_insights=false` to
+disable the broken Anaconda task. The `snt-post_insights_registration`
+snippet handles Insights registration in kickstart `%post` where
+`insights-client --register` with `auto_config=True` correctly routes
+through Satellite. Run:
+
+```bash
+ansible-playbook 19_satellite_global_parameters.yml --limit <satellite-fqdn>
+ansible-playbook 23_satellite_template_deploy.yml --limit <satellite-fqdn>
+```
 
 ### Boot works on Satellite network but not on Capsule network
 

@@ -292,7 +292,7 @@ ansible-playbook 03_satellite_installer.yml
 │       ├── 13_operating_systems.yml
 │       ├── 14_activation_keys.yml
 │       ├── 15a-15d_host_groups_*.yml # Host groups (layered hierarchy)
-│       ├── 16a-16d_global_parameters_*.yml
+│       ├── 16a-16e_global_parameters_*.yml
 ├── docs/
 │   ├── httpboot.md                  # HTTP Boot provisioning guide (Ansible)
 │   ├── httpboot-manual.md           # HTTP Boot manual setup (hammer/API/UI)
@@ -400,7 +400,7 @@ then merged in a dedicated file:
 - `11e_combined_content_views.yml` merges `11a` through `11d`
 - `12g_merge_settings.yml` merges `12a` through `12f`
 - `15d_host_groups_merged.yml` merges `15a` through `15c`
-- `16d_merge_global_parameters.yml` merges `16a` through `16c`
+- `16e_merge_global_parameters.yml` merges `16a` through `16d`
 
 The playbooks consume only the merged variable (e.g. `satellite_products`,
 `satellite_content_views`, `satellite_settings`, `satellite_hostgroups`,

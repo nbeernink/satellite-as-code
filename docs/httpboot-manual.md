@@ -38,6 +38,40 @@ satellite-installer --scenario capsule \
 **UI equivalent**: There is no UI for the installer; it must be run from
 the Capsule CLI.
 
+### DNS Recursion for the Deploy Subnet
+
+By default, `satellite-installer` configures BIND with
+`allow_recursion: ['none']`. Clients on the deploy subnet that use the
+Capsule as their nameserver will fail to resolve external names (e.g.
+`cert-api.access.redhat.com`) with `query (cache) ... denied`.
+
+Create (or extend) the custom Hiera file on the **Capsule**:
+
+```bash
+cat >> /etc/foreman-installer/custom-hiera.yaml <<'EOF'
+dns::allow_recursion:
+  - 'localhost'
+  - '172.16.80.0/24'
+EOF
+```
+
+Then re-run the installer:
+
+```bash
+satellite-installer --scenario capsule
+```
+
+Custom Hiera is the Red Hat supported mechanism for tuning Puppet class
+parameters that have no dedicated installer CLI flag. The file persists
+across future `satellite-installer` runs.
+
+Verify:
+
+```bash
+dig @172.16.80.1 cert-api.access.redhat.com
+# Should return an A record
+```
+
 ---
 
 ## Step 2: Firewall -- Open Port 8000
@@ -286,6 +320,86 @@ hammer template add-operatingsystem \
 
 Without this, Satellite rejects build requests with *"No PXEGrub2
 templates were found for this host"*.
+
+---
+
+## Step 5b: Insights Registration Through Satellite
+
+Anaconda's built-in `ConnectToInsightsTask` tries to reach
+`cert-api.access.redhat.com` directly, which fails with 401 because
+the host holds Satellite-issued identity certificates. The fix is to
+disable the built-in task and register Insights in kickstart `%post`
+where `insights-client` can auto-configure through RHSM/Satellite.
+
+### 5b-a. Disable Anaconda's built-in Insights task
+
+```bash
+hammer global-parameter set \
+  --name "host_registration_insights" \
+  --parameter-type boolean \
+  --value false
+```
+
+This prevents Anaconda's `ConnectToInsightsTask` from running.
+
+### 5b-b. Create the Insights registration snippet
+
+Create a file `/tmp/snt-post_insights_registration.erb`:
+
+```erb
+<%#
+kind: snippet
+name: snt-post_insights_registration
+model: ProvisioningTemplate
+snippet: true
+-%>
+<% if plugin_present?('katello') && @host.content_source -%>
+if command -v insights-client > /dev/null 2>&1; then
+  echo "Registering with Red Hat Insights through Satellite..."
+  insights-client --register 2>&1 || echo "WARNING: Insights registration deferred to post-boot"
+fi
+<% end -%>
+```
+
+Import the snippet:
+
+```bash
+hammer template create \
+  --name "snt-post_insights_registration" \
+  --type snippet \
+  --file /tmp/snt-post_insights_registration.erb \
+  --organizations "CRAZY.LAB" \
+  --locations "loc-local"
+```
+
+### 5b-c. Patch the provision template
+
+In the `pvt-kickstart_default` template (Step 5b), find the line:
+
+```erb
+touch /tmp/foreman_built
+```
+
+Insert the snippet call immediately **before** it:
+
+```erb
+<%= snippet('snt-post_insights_registration') %>
+touch /tmp/foreman_built
+```
+
+Then update:
+
+```bash
+hammer template update \
+  --name "pvt-kickstart_default" \
+  --file /tmp/kickstart-default-stock.erb
+```
+
+> **How it works**: In `%post`, RHSM is fully configured and points to
+> the Capsule. `insights-client --register` with `auto_config=True`
+> (the default) reads `/etc/rhsm/rhsm.conf`, detects the Satellite
+> environment, and routes Insights data through Satellite instead of
+> directly to Red Hat CDN.
 
 ---
 
@@ -562,6 +676,22 @@ subscription-manager register --org=CRAZY_LAB \
   --baseurl=https://<capsule>/pulp/content
 ```
 
+### DNS queries denied on the Capsule
+
+```
+named: client 172.16.80.x: query (cache) 'example.com/A/IN' denied
+```
+
+BIND denies recursive queries from the deploy subnet. See Step 1,
+"DNS Recursion for the Deploy Subnet".
+
+### Insights registration fails with 401 during Anaconda
+
+Anaconda's `ConnectToInsightsTask` reaches `cert-api.access.redhat.com`
+directly and gets rejected. Set `host_registration_insights=false`
+(Step 5b-a) and use the `snt-post_insights_registration` snippet
+(Step 5b-b) instead.
+
 ### GRUB2 menu defaults to PXE entry (not HTTP Boot)
 
 The stock template hardcodes `set default=0`. Check the host-specific
@@ -618,7 +748,8 @@ Then rebuild the host.
 |--------------|------|-----------------|
 | `pvt-kickstart_default_pxegrub2` | PXEGrub2 | Auto-selects HTTP/HTTPS/PXE boot entry based on `@host.pxe_loader` |
 | `snt-kickstart_rhsm` | Snippet | Adds `%pre` script to download CA certs and configure `rhsm.conf` for SSL trust |
-| `pvt-kickstart_default` | Provision | Calls `snt-kickstart_rhsm` instead of stock `kickstart_rhsm` |
+| `snt-post_insights_registration` | Snippet | Registers host with Red Hat Insights via Satellite in `%post` (replaces Anaconda's broken `ConnectToInsightsTask`) |
+| `pvt-kickstart_default` | Provision | Calls `snt-kickstart_rhsm` instead of stock `kickstart_rhsm`; includes `snt-post_insights_registration` before `touch /tmp/foreman_built` |
 
 These follow the `pvt-` (provisioning template) / `snt-` (snippet)
 naming convention. Stock templates are never modified -- custom
@@ -630,11 +761,11 @@ templates are cloned, patched, and associated with the OS.
 
 | Ansible Playbook | Manual Equivalent |
 |-----------------|-------------------|
-| `04_capsule_installer.yml` | `satellite-installer --scenario capsule ...` (Step 1) |
-| `23_satellite_template_deploy.yml` (Satellite) | Steps 3-5 + Step 8 (template creation + Build PXE Defaults) |
+| `04_capsule_installer.yml` | `satellite-installer --scenario capsule ...` (Step 1) + custom Hiera for DNS recursion |
+| `23_satellite_template_deploy.yml` (Satellite) | Steps 3-5 + 5b + Step 8 (template creation + Insights snippet + Build PXE Defaults) |
 | `23_satellite_template_deploy.yml` (Capsule) | Steps 6b + 9 (publish CA + create symlinks) |
 | `16_satellite_operating_systems.yml` | Step 3d + 5d + 5e (OS template associations) |
 | `12_satellite_subnets.yml` | Step 6a (`hammer subnet update`) |
 | `18_satellite_host_groups.yml` | Step 7 (`hammer hostgroup create`) |
-| `19_satellite_global_parameters.yml` | `hammer global-parameter set ...` |
+| `19_satellite_global_parameters.yml` | `hammer global-parameter set ...` (incl. `host_registration_insights`) |
 | `04b_capsule_content.yml` | *Content > Smart Proxies > Capsule > Synchronize* |
