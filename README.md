@@ -8,6 +8,9 @@ Every aspect of the Satellite configuration is expressed as code: playbooks
 handle orchestration, while all environment-specific values live in
 `host_vars` files, enabling clean separation between logic and data.
 
+The most credits of this work are going to [https://github.com/sscheib/ansible_satellite](https://github.com/sscheib/ansible_satellite). 
+Without this, most of the additions would not be possible.
+
 ## Documentation
 
 Detailed guides for specific topics live in the [`docs/`](docs/) folder:
