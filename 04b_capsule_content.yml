@@ -2,6 +2,13 @@
 - name: 'Assign lifecycle environments to a Capsule and sync content'
   hosts: 'all'
   gather_facts: false
+  module_defaults:
+    groups/redhat.satellite.satellite:
+      username: '{{ satellite_username }}'
+      password: '{{ satellite_password }}'
+      server_url: 'https://{{ capsule_satellite_server }}'
+      validate_certs: '{{ capsule_validate_certs | default(false) }}'
+
   tasks:
 
     - name: 'Validate Capsule content variables'
@@ -14,10 +21,6 @@
 
     - name: 'Assign lifecycle environments to {{ inventory_hostname }}'
       redhat.satellite.smart_proxy:
-        username: '{{ satellite_username }}'
-        password: '{{ satellite_password }}'
-        server_url: 'https://{{ capsule_satellite_server }}'
-        validate_certs: '{{ capsule_validate_certs | default(false) }}'
         name: '{{ inventory_hostname }}'
         url: 'https://{{ inventory_hostname }}:9090'
         lifecycle_environments: '{{ capsule_lifecycle_environments }}'
@@ -31,10 +34,6 @@
 
     - name: 'Retrieve Capsule ID for {{ inventory_hostname }}'
       redhat.satellite.resource_info:
-        username: '{{ satellite_username }}'
-        password: '{{ satellite_password }}'
-        server_url: 'https://{{ capsule_satellite_server }}'
-        validate_certs: '{{ capsule_validate_certs | default(false) }}'
         resource: 'smart_proxies'
         search: 'name = {{ inventory_hostname }}'
       delegate_to: 'localhost'

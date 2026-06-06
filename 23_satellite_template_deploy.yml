@@ -2,6 +2,23 @@
 - name: 'Deploy PXE default boot configuration'
   hosts: 'all'
   gather_facts: false
+  module_defaults:
+    groups/redhat.satellite.satellite:
+      username: '{{ satellite_username }}'
+      password: '{{ satellite_password }}'
+      server_url: '{{ satellite_server_url }}'
+      validate_certs: '{{ satellite_validate_certs | default(false) }}'
+      organizations:
+        - '{{ satellite_organization }}'
+      locations:
+        - '{{ satellite_location }}'
+    ansible.builtin.uri:
+      user: '{{ satellite_username }}'
+      password: '{{ satellite_password }}'
+      validate_certs: '{{ satellite_validate_certs | default(false) }}'
+      force_basic_auth: true
+      body_format: 'json'
+
   tasks:
 
     - name: 'Customize and build PXE templates via Satellite API'
@@ -15,20 +32,12 @@
           ansible.builtin.uri:
             url: '{{ satellite_server_url }}/api/v2/provisioning_templates?search=name%3D%22Kickstart+default+PXEGrub2%22&per_page=1'
             method: 'GET'
-            user: '{{ satellite_username }}'
-            password: '{{ satellite_password }}'
-            force_basic_auth: true
-            validate_certs: '{{ satellite_validate_certs | default(false) }}'
           register: '__t_pxegrub2_search'
 
         - name: 'Fetch full PXEGrub2 template content'
           ansible.builtin.uri:
             url: '{{ satellite_server_url }}/api/v2/provisioning_templates/{{ (__t_pxegrub2_search.json.results | first).id }}'
             method: 'GET'
-            user: '{{ satellite_username }}'
-            password: '{{ satellite_password }}'
-            force_basic_auth: true
-            validate_certs: '{{ satellite_validate_certs | default(false) }}'
           register: '__t_pxegrub2_original'
 
         - name: 'Patch PXEGrub2 template to auto-select HTTP Boot default'
@@ -46,38 +55,22 @@
 
         - name: 'Create or update custom PXEGrub2 template'
           redhat.satellite.provisioning_template:
-            username: '{{ satellite_username }}'
-            password: '{{ satellite_password }}'
-            server_url: '{{ satellite_server_url }}'
-            validate_certs: '{{ satellite_validate_certs | default(false) }}'
             name: 'pvt-kickstart_default_pxegrub2'
             kind: 'PXEGrub2'
             template: '{{ __t_pxegrub2_patched }}'
             operatingsystems: "{{ satellite_operatingsystems | default([]) | map(attribute='description') | list }}"
-            organizations:
-              - '{{ satellite_organization }}'
-            locations:
-              - '{{ satellite_location }}'
             state: 'present'
 
         - name: 'Search for original kickstart_rhsm snippet'
           ansible.builtin.uri:
             url: '{{ satellite_server_url }}/api/v2/provisioning_templates?search=name%3D%22kickstart_rhsm%22&per_page=1'
             method: 'GET'
-            user: '{{ satellite_username }}'
-            password: '{{ satellite_password }}'
-            force_basic_auth: true
-            validate_certs: '{{ satellite_validate_certs | default(false) }}'
           register: '__t_rhsm_search'
 
         - name: 'Fetch full kickstart_rhsm snippet content'
           ansible.builtin.uri:
             url: '{{ satellite_server_url }}/api/v2/provisioning_templates/{{ (__t_rhsm_search.json.results | first).id }}'
             method: 'GET'
-            user: '{{ satellite_username }}'
-            password: '{{ satellite_password }}'
-            force_basic_auth: true
-            validate_certs: '{{ satellite_validate_certs | default(false) }}'
           register: '__t_rhsm_original'
 
         - name: 'Build patched kickstart_rhsm with CA cert pre-install'
@@ -106,10 +99,6 @@
           ansible.builtin.uri:
             url: '{{ satellite_server_url }}/api/v2/provisioning_templates?search=name%3D%22snt-kickstart_rhsm%22&per_page=1'
             method: 'GET'
-            user: '{{ satellite_username }}'
-            password: '{{ satellite_password }}'
-            force_basic_auth: true
-            validate_certs: '{{ satellite_validate_certs | default(false) }}'
           register: '__t_rhsm_custom_search'
 
         - name: 'Extract custom snippet ID if it exists'
@@ -121,11 +110,6 @@
           ansible.builtin.uri:
             url: '{{ satellite_server_url }}/api/v2/provisioning_templates'
             method: 'POST'
-            user: '{{ satellite_username }}'
-            password: '{{ satellite_password }}'
-            force_basic_auth: true
-            validate_certs: '{{ satellite_validate_certs | default(false) }}'
-            body_format: 'json'
             body:
               provisioning_template:
                 name: 'snt-kickstart_rhsm'
@@ -141,11 +125,6 @@
           ansible.builtin.uri:
             url: '{{ satellite_server_url }}/api/v2/provisioning_templates/{{ __t_rhsm_custom_id }}'
             method: 'PUT'
-            user: '{{ satellite_username }}'
-            password: '{{ satellite_password }}'
-            force_basic_auth: true
-            validate_certs: '{{ satellite_validate_certs | default(false) }}'
-            body_format: 'json'
             body:
               provisioning_template:
                 template: '{{ __t_rhsm_patched }}'
@@ -156,20 +135,12 @@
           ansible.builtin.uri:
             url: '{{ satellite_server_url }}/api/v2/provisioning_templates?search=name%3D%22Kickstart+default%22&per_page=1'
             method: 'GET'
-            user: '{{ satellite_username }}'
-            password: '{{ satellite_password }}'
-            force_basic_auth: true
-            validate_certs: '{{ satellite_validate_certs | default(false) }}'
           register: '__t_provision_search'
 
         - name: 'Fetch full Kickstart default provision template content'
           ansible.builtin.uri:
             url: '{{ satellite_server_url }}/api/v2/provisioning_templates/{{ (__t_provision_search.json.results | first).id }}'
             method: 'GET'
-            user: '{{ satellite_username }}'
-            password: '{{ satellite_password }}'
-            force_basic_auth: true
-            validate_certs: '{{ satellite_validate_certs | default(false) }}'
           register: '__t_provision_original'
 
         - name: 'Create or update snt-post_insights_registration snippet'
@@ -194,17 +165,9 @@
               fi
               <% end -%>
           redhat.satellite.provisioning_template:
-            username: '{{ satellite_username }}'
-            password: '{{ satellite_password }}'
-            server_url: '{{ satellite_server_url }}'
-            validate_certs: '{{ satellite_validate_certs | default(false) }}'
             name: 'snt-post_insights_registration'
             kind: 'snippet'
             template: '{{ __t_insights_snippet }}'
-            organizations:
-              - '{{ satellite_organization }}'
-            locations:
-              - '{{ satellite_location }}'
             state: 'present'
 
         - name: 'Patch Kickstart default to use custom snippets'
@@ -218,29 +181,16 @@
 
         - name: 'Create or update custom Kickstart default provision template'
           redhat.satellite.provisioning_template:
-            username: '{{ satellite_username }}'
-            password: '{{ satellite_password }}'
-            server_url: '{{ satellite_server_url }}'
-            validate_certs: '{{ satellite_validate_certs | default(false) }}'
             name: 'pvt-kickstart_default'
             kind: 'provision'
             template: '{{ __t_provision_patched }}'
             operatingsystems: "{{ satellite_operatingsystems | default([]) | map(attribute='description') | list }}"
-            organizations:
-              - '{{ satellite_organization }}'
-            locations:
-              - '{{ satellite_location }}'
             state: 'present'
 
         - name: 'Build PXE default templates'
           ansible.builtin.uri:
             url: '{{ satellite_server_url }}/api/v2/provisioning_templates/build_pxe_default'
             method: 'POST'
-            user: '{{ satellite_username }}'
-            password: '{{ satellite_password }}'
-            force_basic_auth: true
-            validate_certs: '{{ satellite_validate_certs | default(false) }}'
-            body_format: 'json'
             body: '{}'
             status_code:
               - 200

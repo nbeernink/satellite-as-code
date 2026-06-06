@@ -2,6 +2,13 @@
 - name: 'Satellite housekeeping - detect and remove orphaned resources'
   hosts: 'all'
   gather_facts: false
+  module_defaults:
+    groups/redhat.satellite.satellite:
+      username: '{{ satellite_username }}'
+      password: '{{ satellite_password }}'
+      server_url: '{{ satellite_server_url }}'
+      validate_certs: '{{ satellite_validate_certs | default(false) }}'
+      organization: '{{ satellite_organization }}'
   vars:
     satellite_housekeeping_enforce: false
   tasks:
@@ -12,12 +19,7 @@
 
     - name: 'Fetch all host groups from Satellite'
       redhat.satellite.resource_info:
-        username: '{{ satellite_username }}'
-        password: '{{ satellite_password }}'
-        server_url: '{{ satellite_server_url }}'
-        validate_certs: '{{ satellite_validate_certs | default(false) }}'
         resource: 'hostgroups'
-        organization: '{{ satellite_organization }}'
       register: '__t_hg_satellite'
 
     - name: 'Build expected host group titles from repository'
@@ -52,13 +54,8 @@
 
     - name: 'Remove orphaned host groups (deepest first)'
       redhat.satellite.hostgroup:
-        username: '{{ satellite_username }}'
-        password: '{{ satellite_password }}'
-        server_url: '{{ satellite_server_url }}'
-        validate_certs: '{{ satellite_validate_certs | default(false) }}'
         name: "{{ item.split('/')[-1] }}"
         parent: "{{ item.split('/')[:-1] | join('/') | default(omit, true) }}"
-        organization: '{{ satellite_organization }}'
         state: 'absent'
       loop: '{{ __t_hg_orphaned }}'
       loop_control:
@@ -73,10 +70,6 @@
 
     - name: 'Fetch all subnets from Satellite'
       redhat.satellite.resource_info:
-        username: '{{ satellite_username }}'
-        password: '{{ satellite_password }}'
-        server_url: '{{ satellite_server_url }}'
-        validate_certs: '{{ satellite_validate_certs | default(false) }}'
         resource: 'subnets'
       register: '__t_sn_satellite'
 
@@ -103,10 +96,6 @@
 
     - name: 'Remove orphaned subnets'
       redhat.satellite.subnet:
-        username: '{{ satellite_username }}'
-        password: '{{ satellite_password }}'
-        server_url: '{{ satellite_server_url }}'
-        validate_certs: '{{ satellite_validate_certs | default(false) }}'
         name: '{{ item }}'
         state: 'absent'
       loop: '{{ __t_sn_orphaned }}'
@@ -122,10 +111,6 @@
 
     - name: 'Fetch all domains from Satellite'
       redhat.satellite.resource_info:
-        username: '{{ satellite_username }}'
-        password: '{{ satellite_password }}'
-        server_url: '{{ satellite_server_url }}'
-        validate_certs: '{{ satellite_validate_certs | default(false) }}'
         resource: 'domains'
       register: '__t_dm_satellite'
 
@@ -152,10 +137,6 @@
 
     - name: 'Remove orphaned domains'
       redhat.satellite.domain:
-        username: '{{ satellite_username }}'
-        password: '{{ satellite_password }}'
-        server_url: '{{ satellite_server_url }}'
-        validate_certs: '{{ satellite_validate_certs | default(false) }}'
         name: '{{ item }}'
         state: 'absent'
       loop: '{{ __t_dm_orphaned }}'
